@@ -10,8 +10,8 @@ Mikan takes a task handled by a large teacher model (classification, extraction,
 |---|---|---|
 | 0 | Eval harness: bootstrap CI, McNemar, non-inferiority, power, reports | Done |
 | 1 | Banking77 teacher labels (open model on Modal) and zero-shot baselines | Done |
-| 2 | SFT distillation (LoRA) with data-size and model-size ablations | Next |
-| 3 | GRPO with programmatic rewards | Planned |
+| 2 | SFT distillation (LoRA) with data-size and model-size ablations | Done |
+| 3 | GRPO with programmatic rewards | Next |
 | 4 | Quantization (AWQ/GPTQ) and vLLM serving benchmark | Planned |
 | 5 | Generalise: new tasks from a config only | Planned |
 
@@ -34,6 +34,26 @@ Teacher: Qwen3-30B-A3B-Instruct (FP8), 10 examples per label, **85.6%** accuracy
 
 No untrained student is within the 2-point margin; closing that gap is the job of Phase 2 (SFT) and Phase 3 (GRPO).
 
+## Phase 2 results (golden set, 3,080 items)
+
+| Student (LoRA SFT, 3 epochs) | Labels | Train items | Golden acc | Gap vs teacher [95% CI] | Decision |
+|---|---|---|---|---|---|
+| Qwen3-0.6B | teacher | 8,222 | 85.6% | +0.1 [−0.8, +0.9] | PASS |
+| Qwen3-1.7B | teacher | 8,222 | 85.4% | +0.3 [−0.6, +1.1] | PASS |
+| Qwen3-4B | teacher | 8,222 | 86.0% | −0.4 [−1.2, +0.5] | PASS |
+| Qwen3-1.7B | teacher | 5,000 | 83.9% | +1.7 [+0.7, +2.7] | FAIL |
+| Qwen3-1.7B | teacher | 2,500 | 82.6% | +3.0 [+1.9, +4.0] | FAIL |
+| Qwen3-1.7B | teacher | 1,000 | 71.0% | +14.6 [+13.1, +16.1] | FAIL |
+| Qwen3-1.7B | ground truth | 8,222 | 93.1% | −7.4 [−8.7, −6.2] | PASS |
+| Qwen3-4B | ground truth | 8,222 | 94.0% | −8.3 [−9.6, −7.1] | PASS |
+
+- **Distillation works at every size.** With the full teacher-labelled set, all three students pass non-inferiority (teacher 85.6%), using a short prompt with no label list or examples. The 0.6B goes from 50.6% (10-shot, untrained) to 85.6%.
+- **The teacher is the ceiling.** Teacher-label students land within half a point of the teacher and disagree with it on only ~6% of items; the same models trained on ground truth reach 93–94%. Better labels, not a bigger student, is the lever.
+- **Data size matters more than model size.** 1k → 2.5k → 5k → 8.2k items gives 71.0 → 82.6 → 83.9 → 85.4% for the 1.7B; only the full set passes. Model size (0.6B / 1.7B / 4B) moves golden accuracy by under one point.
+- Checkpoints were chosen on val only; golden was predicted once per run. Training time on one T4: 0.6B 15 min, 1.7B 23 min, 4B 45 min.
+
+Per-run reports: `reports/phase2/` (not tracked).
+
 ## Install
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
@@ -53,6 +73,18 @@ uv run modal run -m mikan.intake.modal_predict --role student --model Qwen/Qwen3
 ```
 
 Model weights download once into a Modal Volume on a CPU container, so GPUs never bill for downloads.
+
+## SFT on Kaggle
+
+```bash
+uv run python -m mikan.train.kaggle_job push --configs configs/sft_phase2.json --job mikan-sft-phase2
+uv run python -m mikan.train.kaggle_job status --job mikan-sft-phase2
+uv run python -m mikan.train.kaggle_job pull --job mikan-sft-phase2
+uv run python -m mikan.eval.sweep --runs runs/kaggle/mikan-sft-phase2/runs \
+    --teacher runs/teacher-qwen3-30b-a3b-instruct-2507-fp8-10shot --out reports/phase2
+```
+
+`push` bundles the code, prepared splits, cached teacher labels and configs into a private Kaggle dataset and starts a private T4 x2 kernel; each GPU runs its own queue of configs. `mikan.train.sft` can also be run directly on any single GPU.
 
 ## Eval harness
 
@@ -115,13 +147,15 @@ mikan/
   eval/        metrics, paired statistics, power, synthetic data, reports, CLI
   data/        dataset preparation (Banking77 splits, leakage checks)
   intake/      teacher/student batch prediction with vLLM, locally or on Modal
+  train/       LoRA SFT (Unsloth + TRL) and the Kaggle job driver
   prompts.py   shared prompt construction
   tasks.py     task config loader
 tasks/         pre-registered task configs
+configs/       SFT run grids
 tests/         unit tests and the synthetic exit check
 ```
 
-Planned modules: `train/` (SFT, GRPO), `serve/` (quantization, vLLM), `monitor/` (drift and re-evaluation).
+Planned modules: GRPO in `train/`, `serve/` (quantization, vLLM), `monitor/` (drift and re-evaluation).
 
 ## Conventions
 
