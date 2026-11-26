@@ -1,0 +1,15 @@
+# Pre-registered evaluation for Banking77. Fix these values before any training run
+# and do not change them afterwards; the report records this file's SHA-256.
+
+name: banking77
+metric: accuracy            # primary metric, decides pass/fail
+secondary_metrics: [macro_f1]
+delta: 0.02                 # non-inferiority margin: student may be at most 2 accuracy points worse
+confidence: 0.95            # two-sided CI; the upper bound is compared with delta
+power: 0.8                  # target power for the test-set size check
+n_boot: 10000
+seed: 0
+
+# Relative paths are resolved from this file's folder. Created in Phase 1.
+labels_file: ../data/banking77/labels.txt
+label_source: "Banking77 official test split (dataset ground truth)"
