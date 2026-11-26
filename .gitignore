@@ -7,10 +7,10 @@ dist/
 build/
 
 # data and run outputs (never commit raw or teacher data)
-data/
-runs/
-reports/
+/data/
+/runs/
+/reports/
 
 # local-only project notes
-docs/
-CLAUDE.md
+/docs/
+/CLAUDE.md
