@@ -9,8 +9,8 @@ Mikan takes a task handled by a large teacher model (classification, extraction,
 | Phase | What | State |
 |---|---|---|
 | 0 | Eval harness: bootstrap CI, McNemar, non-inferiority, power, reports | Done |
-| 1 | Banking77 teacher labels (open model on Modal) and zero-shot baselines | Next |
-| 2 | SFT distillation (LoRA) with data-size and model-size ablations | Planned |
+| 1 | Banking77 teacher labels (open model on Modal) and zero-shot baselines | Done |
+| 2 | SFT distillation (LoRA) with data-size and model-size ablations | Next |
 | 3 | GRPO with programmatic rewards | Planned |
 | 4 | Quantization (AWQ/GPTQ) and vLLM serving benchmark | Planned |
 | 5 | Generalise: new tasks from a config only | Planned |
@@ -22,6 +22,18 @@ Mikan takes a task handled by a large teacher model (classification, extraction,
 - Margin: δ = 2 accuracy points, pre-registered in [`tasks/banking77.yaml`](tasks/banking77.yaml).
 - Teacher: Qwen3-30B-A3B-Instruct served with vLLM. Students: Qwen3 0.6B / 1.7B / 4B, trained with TRL + Unsloth.
 
+## Phase 1 results (golden set, 3,080 items)
+
+Teacher: Qwen3-30B-A3B-Instruct (FP8), 10 examples per label, **85.6%** accuracy.
+
+| Untrained student | 0-shot | 10-shot |
+|---|---|---|
+| Qwen3-0.6B | 36.0% | 50.6% |
+| Qwen3-1.7B | 48.6% | 65.9% |
+| Qwen3-4B | 63.4% | 79.1% |
+
+No untrained student is within the 2-point margin; closing that gap is the job of Phase 2 (SFT) and Phase 3 (GRPO).
+
 ## Install
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
@@ -30,6 +42,17 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 uv sync
 uv run pytest -q
 ```
+
+## Data and teacher labels
+
+```bash
+uv run python -m mikan.data.banking77 --out data/banking77 --fewshot-per-label 10
+uv run modal run -m mikan.intake.modal_predict --splits smoke --shots 10              # 50 items
+uv run modal run -m mikan.intake.modal_predict --splits train,val,golden --shots 10   # full run
+uv run modal run -m mikan.intake.modal_predict --role student --model Qwen/Qwen3-1.7B --splits val,golden --shots 0
+```
+
+Model weights download once into a Modal Volume on a CPU container, so GPUs never bill for downloads.
 
 ## Eval harness
 
@@ -90,12 +113,15 @@ uv run mikan-eval selfcheck
 ```text
 mikan/
   eval/        metrics, paired statistics, power, synthetic data, reports, CLI
+  data/        dataset preparation (Banking77 splits, leakage checks)
+  intake/      teacher/student batch prediction with vLLM, locally or on Modal
+  prompts.py   shared prompt construction
   tasks.py     task config loader
 tasks/         pre-registered task configs
 tests/         unit tests and the synthetic exit check
 ```
 
-Planned modules: `intake/` (teacher data), `data/` (splits), `train/` (SFT, GRPO), `serve/` (quantization, vLLM), `monitor/` (drift and re-evaluation).
+Planned modules: `train/` (SFT, GRPO), `serve/` (quantization, vLLM), `monitor/` (drift and re-evaluation).
 
 ## Conventions
 
