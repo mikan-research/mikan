@@ -1,0 +1,11 @@
+[
+  {"name": "sft-qwen3-4b-teacher-full", "gpu": 0, "model": "Qwen/Qwen3-4B", "targets": "teacher", "batch": 16, "eval_batch": 64},
+  {"name": "sft-qwen3-4b-gold-full", "gpu": 0, "model": "Qwen/Qwen3-4B", "targets": "gold", "batch": 16, "eval_batch": 64},
+
+  {"name": "sft-qwen3-1.7b-teacher-full", "gpu": 1, "model": "Qwen/Qwen3-1.7B", "targets": "teacher"},
+  {"name": "sft-qwen3-1.7b-gold-full", "gpu": 1, "model": "Qwen/Qwen3-1.7B", "targets": "gold"},
+  {"name": "sft-qwen3-0.6b-teacher-full", "gpu": 1, "model": "Qwen/Qwen3-0.6B", "targets": "teacher"},
+  {"name": "sft-qwen3-1.7b-teacher-1000", "gpu": 1, "model": "Qwen/Qwen3-1.7B", "targets": "teacher", "n_train": 1000},
+  {"name": "sft-qwen3-1.7b-teacher-2500", "gpu": 1, "model": "Qwen/Qwen3-1.7B", "targets": "teacher", "n_train": 2500},
+  {"name": "sft-qwen3-1.7b-teacher-5000", "gpu": 1, "model": "Qwen/Qwen3-1.7B", "targets": "teacher", "n_train": 5000}
+]

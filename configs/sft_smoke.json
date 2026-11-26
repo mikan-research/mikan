@@ -1,0 +1,4 @@
+[
+  {"name": "smoke-qwen3-0.6b-teacher-500", "gpu": 0, "model": "Qwen/Qwen3-0.6B", "targets": "teacher", "n_train": 500, "epochs": 2, "eval_limit": 200},
+  {"name": "smoke-qwen3-1.7b-gold-500", "gpu": 1, "model": "Qwen/Qwen3-1.7B", "targets": "gold", "n_train": 500, "epochs": 2, "eval_limit": 200}
+]

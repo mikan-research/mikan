@@ -1,0 +1,4 @@
+[
+  {"name": "sft-qwen3-4b-teacher-full", "gpu": 0, "model": "Qwen/Qwen3-4B", "targets": "teacher", "batch": 16, "eval_batch": 16},
+  {"name": "sft-qwen3-4b-gold-full", "gpu": 1, "model": "Qwen/Qwen3-4B", "targets": "gold", "batch": 16, "eval_batch": 16}
+]
