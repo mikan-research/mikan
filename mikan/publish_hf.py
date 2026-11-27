@@ -2,6 +2,8 @@
 
     uv run --with huggingface_hub python -m mikan.publish_hf stage    # writes build/hf/
     uv run --with huggingface_hub python -m mikan.publish_hf upload   # creates private repos, uploads
+    uv run --with huggingface_hub python -m mikan.publish_hf stage --task massive   # MASSIVE dataset repo
+    uv run --with huggingface_hub python -m mikan.publish_hf upload --task massive
 
 ``stage`` copies each kept adapter plus its run metadata into ``build/hf/<repo>/`` and
 writes a model card; the dataset repo gets the splits, teacher labels and every student
@@ -166,17 +168,95 @@ def stage(user: str) -> None:
     print(f"staged {len(MODELS)} models and 1 dataset in {STAGE}/")
 
 
-def upload(user: str) -> None:
+MASSIVE_DATASET = "mikan-massive-distill"
+MASSIVE_TEACHER = REPO / "runs" / "massive-teacher-knn8"
+MASSIVE_PILOTS = {  # pilot name -> run dir (same 300 val items each)
+    "1shot": REPO / "runs/kaggle/mikan-teacher-massive-pilot/teacher/massive-teacher-1shot",
+    "3shot": REPO / "runs/kaggle/mikan-teacher-massive-pilot/teacher/massive-teacher-3shot",
+    "knn8": REPO / "runs/kaggle/mikan-teacher-massive-knn/teacher/massive-teacher-knn8",
+    "knn20": REPO / "runs/kaggle/mikan-teacher-massive-knn/teacher/massive-teacher-knn20",
+}
+
+
+def massive_card(teacher: dict[str, float], pilots: dict[str, float]) -> str:
+    rows = "\n".join(f"| {k} | {pct(v)}% |" for k, v in pilots.items())
+    return f"""---
+license: cc-by-4.0
+task_categories:
+- token-classification
+- text-classification
+language:
+- en
+source_datasets:
+- AmazonScience/massive
+tags:
+- distillation
+- semantic-parsing
+- slot-filling
+---
+
+# Mikan MASSIVE en-US distillation data
+
+Splits, retrieval neighbours and teacher frames from Mikan's structured-output task: parse a voice-assistant
+request into `{{"intent", "slots": [{{"type", "value"}}]}}` (60 intents, 55 slot types).
+
+- `massive/`: `train` (11,255), `val` (2,026, the official dev split, shuffled), `golden` (2,974, the official
+  test split, ground truth), `fewshot` (181, every slot type covered), `intents.txt`, `slot_types.txt`,
+  `retrieved.jsonl` (32 nearest labelled train/fewshot items per train/val/golden item by TF-IDF; an item never
+  retrieves itself and val/golden are never in the pool).
+- `teacher/`: frames from `JunHowie/Qwen3-30B-A3B-Instruct-2507-GPTQ-Int4` (vLLM 0.13, 2x T4, fp16, decoding
+  constrained to the frame JSON schema) prompted with the 8 retrieved examples per item. Exact frame match vs
+  ground truth: train {pct(teacher['train'])}%, val {pct(teacher['val'])}%, golden {pct(teacher['golden'])}%. 100% valid frames.
+- `pilots/`: the prompt pilot on the same 300 val items, kept as the record of how the prompt was chosen:
+
+| Prompt | Exact frame match |
+|---|---|
+{rows}
+
+Derived from MASSIVE v1.1 (Amazon, CC-BY-4.0): FitzGerald et al., 2022, "MASSIVE: A 1M-Example Multilingual
+Natural Language Understanding Dataset with 51 Typologically-Diverse Languages". Annotator ids were dropped.
+"""
+
+
+def stage_massive() -> None:
+    d = STAGE / MASSIVE_DATASET
+    if d.exists():
+        shutil.rmtree(d)
+    (d / "massive").mkdir(parents=True)
+    for f in sorted((REPO / "data" / "massive").iterdir()):
+        if f.is_file() and f.suffix in (".jsonl", ".txt", ".json"):
+            shutil.copy(f, d / "massive" / f.name)
+    (d / "teacher").mkdir()
+    teacher = {}
+    for split in ("train", "val", "golden"):
+        for kind in ("preds.jsonl", "meta.json"):
+            shutil.copy(MASSIVE_TEACHER / f"{split}_{kind}", d / "teacher" / f"{split}_{kind}")
+        teacher[split] = json.loads((MASSIVE_TEACHER / f"{split}_meta.json").read_text())["accuracy_vs_gold"]
+    pilots = {}
+    for name, run in MASSIVE_PILOTS.items():
+        out = d / "pilots" / name
+        out.mkdir(parents=True)
+        for kind in ("preds.jsonl", "meta.json"):
+            shutil.copy(run / f"pilot_{kind}", out / f"pilot_{kind}")
+        pilots[name] = json.loads((run / "pilot_meta.json").read_text())["accuracy_vs_gold"]
+    (d / "README.md").write_text(massive_card(teacher, pilots))
+    print(f"staged {d}/")
+
+
+def upload(user: str, task: str = "banking77") -> None:
     from huggingface_hub import HfApi
 
     api = HfApi()
-    targets = [(repo, "model") for repo in MODELS.values()] + [(DATASET, "dataset")]
+    if task == "massive":
+        targets = [(MASSIVE_DATASET, "dataset")]
+    else:
+        targets = [(repo, "model") for repo in MODELS.values()] + [(DATASET, "dataset")]
     for repo, kind in targets:
         rid = f"{user}/{repo}"
         api.create_repo(rid, repo_type=kind, private=True, exist_ok=True)
         if not api.repo_info(rid, repo_type=kind).private:
             raise SystemExit(f"{rid} exists and is public; not uploading")
-        api.upload_folder(repo_id=rid, repo_type=kind, folder_path=STAGE / repo, commit_message="Upload Mikan Phase 2 artifacts")
+        api.upload_folder(repo_id=rid, repo_type=kind, folder_path=STAGE / repo, commit_message=f"Upload Mikan {task} artifacts")
         print(f"uploaded https://huggingface.co/{'datasets/' if kind == 'dataset' else ''}{rid} (private)")
 
 
@@ -184,13 +264,19 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Back up Mikan artifacts to the HF Hub (private)")
     p.add_argument("cmd", choices=["stage", "upload"])
     p.add_argument("--user", help="HF username (default: the logged-in account)")
+    p.add_argument("--task", choices=["banking77", "massive"], default="banking77")
     args = p.parse_args(argv)
     if args.user:
         user = args.user
     else:
         from huggingface_hub import whoami
         user = whoami()["name"]
-    stage(user) if args.cmd == "stage" else upload(user)
+    if args.cmd == "upload":
+        upload(user, args.task)
+    elif args.task == "massive":
+        stage_massive()
+    else:
+        stage(user)
     return 0
 
 
