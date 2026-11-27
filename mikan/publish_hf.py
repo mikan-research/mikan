@@ -1,4 +1,4 @@
-"""Back up Mikan adapters and labels to the Hugging Face Hub as private repos.
+"""Publish Mikan adapters and labels to the Hugging Face organization (``mikan-research``).
 
     uv run --with huggingface_hub python -m mikan.publish_hf stage    # writes build/hf/
     uv run --with huggingface_hub python -m mikan.publish_hf upload   # creates private repos, uploads
@@ -7,7 +7,9 @@
 
 ``stage`` copies each kept adapter plus its run metadata into ``build/hf/<repo>/`` and
 writes a model card; the dataset repo gets the splits, teacher labels and every student
-run's predictions. ``upload`` never changes an existing repo's visibility.
+run's predictions. ``upload`` creates missing repos as private and never changes an
+existing repo's visibility; uploading into a repo that is already public needs
+``--allow-public``, so updating a published artifact is always deliberate.
 """
 
 from __future__ import annotations
@@ -24,14 +26,16 @@ RUNS = REPO / "runs" / "kaggle" / "mikan-sft-phase2" / "runs"
 TEACHER = REPO / "runs" / "teacher-qwen3-30b-a3b-instruct-2507-fp8-10shot"
 SUMMARY = REPO / "reports" / "phase2" / "summary.json"
 STAGE = REPO / "build" / "hf"
-DATASET = "mikan-banking77-distill"
+DATASET = "banking77-distill"
+NAMESPACE = "mikan-research"
+CODE_URL = "https://github.com/mikan-research/mikan"
 
 MODELS = {  # run name -> repo name
-    "sft-qwen3-0.6b-teacher-full": "mikan-banking77-qwen3-0.6b-lora",
-    "sft-qwen3-1.7b-teacher-full": "mikan-banking77-qwen3-1.7b-lora",
-    "sft-qwen3-4b-teacher-full": "mikan-banking77-qwen3-4b-lora",
-    "sft-qwen3-1.7b-gold-full": "mikan-banking77-qwen3-1.7b-gold-lora",
-    "sft-qwen3-4b-gold-full": "mikan-banking77-qwen3-4b-gold-lora",
+    "sft-qwen3-0.6b-teacher-full": "banking77-qwen3-0.6b-lora",
+    "sft-qwen3-1.7b-teacher-full": "banking77-qwen3-1.7b-lora",
+    "sft-qwen3-4b-teacher-full": "banking77-qwen3-4b-lora",
+    "sft-qwen3-1.7b-gold-full": "banking77-qwen3-1.7b-gold-lora",
+    "sft-qwen3-4b-gold-full": "banking77-qwen3-4b-gold-lora",
 }
 ADAPTER_FILES = ["adapter_config.json", "adapter_model.safetensors", "tokenizer.json",
                  "tokenizer_config.json", "chat_template.jinja"]
@@ -64,7 +68,7 @@ tags:
 # {base.split('/')[-1]} LoRA for Banking77 intent classification
 
 LoRA adapter for `{base}`, trained on {meta['n_train']:,} Banking77 training messages with {labels}.
-Part of Mikan, a pipeline that distils a large model's behaviour on one narrow task into a small
+Part of [Mikan]({CODE_URL}), a pipeline that distils a large model's behaviour on one narrow task into a small
 model and tests non-inferiority with a pre-registered margin.
 
 ## Results (Banking77 test split, 3,080 items, ground truth)
@@ -122,6 +126,9 @@ tags:
 
 # Mikan Banking77 distillation data
 
+Part of [Mikan]({CODE_URL}): distil a large model's behaviour on one narrow task into a small open model, judged by a
+pre-registered non-inferiority test. Issues, results and pull requests are welcome on GitHub.
+
 Splits, teacher labels and student predictions from Mikan's Banking77 experiments.
 
 - `banking77/`: `train` (8,222), `val` (1,000, 10% per label), `fewshot` (770, ranked pool for the teacher prompt),
@@ -168,7 +175,7 @@ def stage(user: str) -> None:
     print(f"staged {len(MODELS)} models and 1 dataset in {STAGE}/")
 
 
-MASSIVE_DATASET = "mikan-massive-distill"
+MASSIVE_DATASET = "massive-distill"
 MASSIVE_TEACHER = REPO / "runs" / "massive-teacher-knn8"
 MASSIVE_PILOTS = {  # pilot name -> run dir (same 300 val items each)
     "1shot": REPO / "runs/kaggle/mikan-teacher-massive-pilot/teacher/massive-teacher-1shot",
@@ -197,6 +204,9 @@ tags:
 
 # Mikan MASSIVE en-US distillation data
 
+Part of [Mikan]({CODE_URL}): distil a large model's behaviour on one narrow task into a small open model, judged by a
+pre-registered non-inferiority test. Issues, results and pull requests are welcome on GitHub.
+
 Splits, retrieval neighbours and teacher frames from Mikan's structured-output task: parse a voice-assistant
 request into `{{"intent", "slots": [{{"type", "value"}}]}}` (60 intents, 55 slot types).
 
@@ -224,10 +234,10 @@ Natural Language Understanding Dataset with 51 Typologically-Diverse Languages".
 MASSIVE_RUNS = REPO / "runs" / "phase3"
 MASSIVE_SUMMARY = REPO / "reports" / "phase3" / "summary.json"
 MASSIVE_MODELS = {  # run name -> repo name
-    "grpo-massive-1.7b-from-full": "mikan-massive-qwen3-1.7b-grpo-lora",
-    "grpo-massive-0.6b-from-full": "mikan-massive-qwen3-0.6b-grpo-lora",
-    "sft-massive-1.7b-teacher-full": "mikan-massive-qwen3-1.7b-sft-lora",
-    "sft-massive-1.7b-gold-full": "mikan-massive-qwen3-1.7b-gold-lora",
+    "grpo-massive-1.7b-from-full": "massive-qwen3-1.7b-grpo-lora",
+    "grpo-massive-0.6b-from-full": "massive-qwen3-0.6b-grpo-lora",
+    "sft-massive-1.7b-teacher-full": "massive-qwen3-1.7b-sft-lora",
+    "sft-massive-1.7b-gold-full": "massive-qwen3-1.7b-gold-lora",
 }
 
 
@@ -270,7 +280,7 @@ tags:
 
 LoRA adapter for `{base}` that parses a voice-assistant request into a JSON frame
 `{{"intent": ..., "slots": [{{"type": ..., "value": ...}}]}}` (60 intents, 55 slot types), trained on {labels}.
-Part of Mikan, a pipeline that distils a large model's behaviour on one narrow task into a small model and tests
+Part of [Mikan]({CODE_URL}), a pipeline that distils a large model's behaviour on one narrow task into a small model and tests
 non-inferiority with a pre-registered margin.
 
 ## Results (MASSIVE en-US test split, 2,974 items, ground-truth frames)
@@ -357,7 +367,7 @@ def stage_massive() -> None:
     print(f"staged {d}/")
 
 
-def upload(user: str, task: str = "banking77") -> None:
+def upload(user: str, task: str = "banking77", allow_public: bool = False) -> None:
     from huggingface_hub import HfApi
 
     api = HfApi()
@@ -368,25 +378,23 @@ def upload(user: str, task: str = "banking77") -> None:
     for repo, kind in targets:
         rid = f"{user}/{repo}"
         api.create_repo(rid, repo_type=kind, private=True, exist_ok=True)
-        if not api.repo_info(rid, repo_type=kind).private:
-            raise SystemExit(f"{rid} exists and is public; not uploading")
-        api.upload_folder(repo_id=rid, repo_type=kind, folder_path=STAGE / repo, commit_message=f"Upload Mikan {task} artifacts")
-        print(f"uploaded https://huggingface.co/{'datasets/' if kind == 'dataset' else ''}{rid} (private)")
+        private = api.repo_info(rid, repo_type=kind).private
+        if not private and not allow_public:
+            raise SystemExit(f"{rid} is public; pass --allow-public to update it")
+        api.upload_folder(repo_id=rid, repo_type=kind, folder_path=STAGE / repo, commit_message=f"Update Mikan {task} artifacts")
+        print(f"uploaded https://huggingface.co/{'datasets/' if kind == 'dataset' else ''}{rid} ({'private' if private else 'public'})")
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Back up Mikan artifacts to the HF Hub (private)")
+    p = argparse.ArgumentParser(description="Publish Mikan artifacts to the Hugging Face Hub")
     p.add_argument("cmd", choices=["stage", "upload"])
-    p.add_argument("--user", help="HF username (default: the logged-in account)")
+    p.add_argument("--namespace", default=NAMESPACE, help="HF organization or user that owns the repos")
+    p.add_argument("--allow-public", action="store_true", help="allow uploading into repos that are already public")
     p.add_argument("--task", choices=["banking77", "massive"], default="banking77")
     args = p.parse_args(argv)
-    if args.user:
-        user = args.user
-    else:
-        from huggingface_hub import whoami
-        user = whoami()["name"]
+    user = args.namespace
     if args.cmd == "upload":
-        upload(user, args.task)
+        upload(user, args.task, args.allow_public)
     elif args.task == "massive":
         stage_massive_models(user)
         stage_massive()
