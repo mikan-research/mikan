@@ -44,7 +44,7 @@ These are what make a Mikan result mean something. PRs that break them will be a
   `mikan.eval.sweep`, plus the run config. Use the "Result report" issue template.
 - **Models and data.** Adapters and datasets live in the Hugging Face organization; open a discussion or pull
   request on the relevant repo for card fixes, or link new artifacts from a result issue.
-- **Code.** Bug fixes, faster training, quantization and serving (Phase 4), monitoring (Phase 5).
+- **Code.** Bug fixes, faster training, quantization and serving, and evaluation tooling.
 
 ## Pull requests
 

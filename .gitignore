@@ -16,3 +16,7 @@ build/
 
 # local build artefacts (Kaggle bundles)
 /build/
+
+# local-only planning notes (roadmap, risks, setup, budget)
+/notes/
+/downloads/

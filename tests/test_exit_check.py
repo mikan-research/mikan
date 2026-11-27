@@ -1,4 +1,4 @@
-"""Phase 0 exit criterion: the full decision rule passes/fails synthetic students correctly."""
+"""Self-check: the full decision rule passes/fails synthetic students correctly."""
 
 import numpy as np
 import pytest

@@ -218,7 +218,7 @@ request into `{{"intent", "slots": [{{"type", "value"}}]}}` (60 intents, 55 slot
   constrained to the frame JSON schema) prompted with the 8 retrieved examples per item. Exact frame match vs
   ground truth: train {pct(teacher['train'])}%, val {pct(teacher['val'])}%, golden {pct(teacher['golden'])}%. Every train and
   val frame is valid; one golden output (of 2,974) was cut off at the 160-token limit and counts as wrong.
-- `students/<run>/`: per-checkpoint validation and final golden predictions plus `meta.json` for every Phase 3 SFT
+- `students/<run>/`: per-checkpoint validation and final golden predictions plus `meta.json` for every SFT
   and GRPO run; `summary.json` is the sweep against the teacher.
 - `pilots/`: the prompt pilot on the same 300 val items, kept as the record of how the prompt was chosen:
 

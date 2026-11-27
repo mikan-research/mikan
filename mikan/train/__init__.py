@@ -1,1 +1,1 @@
-"""Student training: SFT distillation (Phase 2), GRPO (Phase 3)."""
+"""Student training: LoRA SFT distillation and GRPO."""

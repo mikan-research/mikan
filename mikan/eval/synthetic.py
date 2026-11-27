@@ -70,7 +70,7 @@ def exit_check(
     confidence: float = 0.95,
     seed: int = 0,
 ) -> list[ExitCheckRow]:
-    """Phase 0 exit check: pass rates of the full bootstrap test on synthetic students.
+    """Self-check: pass rates of the full bootstrap test on synthetic students.
 
     For each true gap, generate ``n_datasets`` synthetic test sets, run the real
     decision rule, and compare the pass rate with the analytic power. Expected

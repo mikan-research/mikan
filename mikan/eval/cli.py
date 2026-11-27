@@ -84,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--seed", type=int, default=0)
     w.set_defaults(func=_cmd_power)
 
-    s = sub.add_parser("selfcheck", help="Phase 0 exit check on synthetic students with known gaps")
+    s = sub.add_parser("selfcheck", help="self-check on synthetic students with known gaps")
     s.add_argument("--n", type=int, default=3080)
     s.add_argument("--disagreement", type=float, default=0.08)
     s.add_argument("--delta", type=float, default=0.02)
