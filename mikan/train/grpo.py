@@ -123,7 +123,8 @@ def main(argv: list[str] | None = None) -> int:
                                        add_generation_prompt=True, enable_thinking=False)
 
     def predict(rows: list[dict]) -> list[str]:
-        return greedy(model, tok, [prompt_text(r["text"]) for r in rows], args.eval_batch, args.max_completion)
+        return greedy(model, tok, [prompt_text(r["text"]) for r in rows], args.eval_batch, args.max_completion,
+                      first_line=False)
 
     dataset = Dataset.from_list([{"prompt": prompt_text(r["text"]), "ref": r["target"], "text": r["text"]}
                                  for r in prompts_rows])

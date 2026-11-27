@@ -92,7 +92,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     def predict(rows: list[dict]) -> list[str]:
-        return greedy(model, tok, [prompt_text(r["text"]) for r in rows], args.eval_batch, max_new)
+        return greedy(model, tok, [prompt_text(r["text"]) for r in rows], args.eval_batch, max_new,
+                      first_line=kind != "frames")
 
     history: list[dict] = []
     meta_base = {

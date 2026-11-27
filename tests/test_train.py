@@ -139,3 +139,13 @@ def test_trainer_cli_parses(module):
     extra = ["--adapter", "a"] if module.endswith("grpo") else []
     args = mod.parse_args(["--data", "d", "--out", "o", "--model", "m", *extra])
     assert args.out == "o"
+
+
+def test_postprocess_matches_reward_for_frames():
+    from mikan.frames import parse
+    from mikan.train.gen import postprocess  # unsloth is imported only inside greedy()
+
+    multi = '{"intent": "alarm_set",\n "slots": []}\n'
+    assert parse(postprocess(multi, first_line=False)) is not None   # frames: whole output, as the reward sees it
+    assert parse(postprocess(multi, first_line=True)) is None        # the old first-line rule would cut it
+    assert postprocess("  card_arrival \nextra", first_line=True) == "card_arrival"  # labels unchanged
