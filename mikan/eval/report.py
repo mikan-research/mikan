@@ -46,7 +46,7 @@ def _examples(al: Aligned, a: str, b: str, mask: np.ndarray, limit: int) -> list
             {
                 "id": al.ids[i],
                 "text": al.texts[i] if al.texts else None,
-                "gold": al.labels[al.gold[i]],
+                "gold": al.gold_display[i] if al.gold_display else al.labels[al.gold[i]],
                 a: al.raw_preds[a][i],
                 b: al.raw_preds[b][i],
             }
@@ -95,8 +95,13 @@ def evaluate(al: Aligned, task: TaskConfig, a: str = "teacher", b: str = "studen
             f"Test set is underpowered: at the observed disagreement the smallest margin resolvable with "
             f"{task.power:.0%} power is {power['min_detectable_margin']:.2%}, larger than delta."
         )
+    summary = {name: _system_summary(gold, al.preds[name], al.n_classes) for name in (a, b)}
+    if al.frame_summary:
+        summary = {name: {"accuracy": al.frame_summary[name]["exact_match"], **al.frame_summary[name]} for name in (a, b)}
+        limitations.append("Primary metric is exact frame match: intent and the multiset of (slot type, value) "
+                           "pairs must equal gold; values compare case- and whitespace-insensitively.")
     for name in (a, b):
-        v = validity_rate(al.preds[name])
+        v = summary[name]["validity_rate"]
         if v < 1:
             limitations.append(f"{name} produced {1 - v:.2%} invalid outputs (counted as wrong).")
 
@@ -115,10 +120,8 @@ def evaluate(al: Aligned, task: TaskConfig, a: str = "teacher", b: str = "studen
         "n_items": n,
         "n_classes": al.n_classes,
         "systems": {"a": a, "b": b},
-        "summary": {
-            a: _system_summary(gold, pa, al.n_classes),
-            b: _system_summary(gold, pb, al.n_classes),
-        },
+        "kind": "frames" if al.frame_summary else "labels",
+        "summary": summary,
         "primary": primary.__dict__,
         "secondary": [s.__dict__ for s in secondary],
         "non_inferiority": ni.__dict__,
@@ -160,9 +163,16 @@ def render_markdown(r: dict, n_slices: int = 10) -> str:
         "| System | Accuracy (%) | Macro-F1 (%) | Valid outputs (%) |",
         "|---|---|---|---|",
     ]
+    if r.get("kind") == "frames":
+        lines[-2:] = ["| System | Exact match (%) | Intent acc (%) | Slot F1 (%) | Valid (%) | Grounded (%) |",
+                      "|---|---|---|---|---|---|"]
     for name in (a, b):
         s = r["summary"][name]
-        lines.append(f"| {name} | {_pct(s['accuracy'])} | {_pct(s['macro_f1'])} | {_pct(s['validity_rate'])} |")
+        if r.get("kind") == "frames":
+            lines.append(f"| {name} | {_pct(s['exact_match'])} | {_pct(s['intent_accuracy'])} | {_pct(s['slot_f1'])} | "
+                         f"{_pct(s['validity_rate'])} | {_pct(s['grounded_rate'])} |")
+        else:
+            lines.append(f"| {name} | {_pct(s['accuracy'])} | {_pct(s['macro_f1'])} | {_pct(s['validity_rate'])} |")
 
     lines += ["", "## Differences", "", f"| Metric | {a} − {b} (points) | {conf}% CI |", "|---|---|---|"]
     for ci in [p, *r["secondary"]]:

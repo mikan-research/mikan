@@ -1,0 +1,9 @@
+{
+  "data": "massive",
+  "tp": 2,
+  "attention_backend": "TRITON_ATTN",
+  "candidates": [{"model": "JunHowie/Qwen3-30B-A3B-Instruct-2507-GPTQ-Int4"}],
+  "probe": {"splits": "smoke", "retrieved": 8},
+  "runs": [{"name": "massive-teacher-knn8-part2", "splits": "train_part2,val,golden", "retrieved": 8}],
+  "run_timeout": 30000
+}

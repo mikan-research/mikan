@@ -7,6 +7,10 @@ Run from the repo root in module mode, so the local ``mikan`` package is found:
     uv run modal run -m mikan.intake.modal_predict --splits train,val,golden
     uv run modal run -m mikan.intake.modal_predict --role student \
         --model Qwen/Qwen3-1.7B --splits val,golden --shots 0
+    uv run modal run -m mikan.intake.modal_predict --data-dir data/massive --splits pilot --shots 1
+
+A data dir with ``intents.txt`` and ``slot_types.txt`` is a frames task: the prompt lists both
+and decoding is constrained to the frame JSON schema instead of a label choice.
 
 All requested splits go to one remote call, so the model loads once. Outputs go to
 ``runs/<role>-<model>-<prompt>/{split}_preds.jsonl`` plus ``{split}_meta.json``.
@@ -50,17 +54,21 @@ def download_model(model: str) -> float:
 
 
 @app.function(gpu=GPU["teacher"], **_fn_kwargs)
-def generate_teacher(model: str, system: str, texts: list[str], choices: list[str] | None, max_model_len: int) -> dict:
+def generate_teacher(model: str, system: str, texts: list[str], choices: list[str] | None, max_model_len: int,
+                    json_schema: dict | None = None, max_tokens: int = 24) -> dict:
     from mikan.intake.vllm_predict import predict
 
-    return predict(model, system, texts, choices, max_model_len=max_model_len)
+    return predict(model, system, texts, choices, max_model_len=max_model_len, json_schema=json_schema,
+                   max_tokens=max_tokens)
 
 
 @app.function(gpu=GPU["student"], **_fn_kwargs)
-def generate_student(model: str, system: str, texts: list[str], choices: list[str] | None, max_model_len: int) -> dict:
+def generate_student(model: str, system: str, texts: list[str], choices: list[str] | None, max_model_len: int,
+                    json_schema: dict | None = None, max_tokens: int = 24) -> dict:
     from mikan.intake.vllm_predict import predict
 
-    return predict(model, system, texts, choices, max_model_len=max_model_len)
+    return predict(model, system, texts, choices, max_model_len=max_model_len, json_schema=json_schema,
+                   max_tokens=max_tokens)
 
 
 def context_length(system: str) -> int:
@@ -82,8 +90,8 @@ def main(
     data_dir: str = "data/banking77",
     out_dir: str = "",
 ):
-    from mikan.intake.runs import load_split, read_jsonl, write_run
-    from mikan.prompts import prompt_sha256, select_shots, system_prompt
+    from mikan.intake.runs import load_split, write_run
+    from mikan.prompts import prompt_sha256, task_setup
 
     if role not in GPU:
         raise SystemExit(f"role must be one of {sorted(GPU)}")
@@ -92,8 +100,8 @@ def main(
         raise SystemExit("--model is required for students")
 
     data = Path(data_dir)
-    labels = [ln.strip() for ln in (data / "labels.txt").read_text().splitlines() if ln.strip()]
-    system = system_prompt(labels, select_shots(read_jsonl(data / "fewshot.jsonl"), shots))
+    setup = task_setup(data, shots, constrained)
+    system, frames_task = setup["system"], setup["kind"] == "frames"
 
     split_names = [s.strip() for s in splits.split(",") if s.strip()]
     rows = {s: load_split(data, s) for s in split_names}
@@ -103,10 +111,12 @@ def main(
     print(f"  weights cache ready in {download_model.remote(model):.0f}s (CPU)")
     fn = generate_teacher if role == "teacher" else generate_student
     t0 = time.time()
-    result = fn.remote(model, system, texts, labels if constrained else None, context_length(system))
+    result = fn.remote(model, system, texts, setup["choices"], context_length(system),
+                       json_schema=setup["json_schema"], max_tokens=setup["max_tokens"])
     wall = time.time() - t0
 
-    tag = f"{role}-{model.split('/')[-1].lower()}-{shots}shot{'' if constrained else '-free'}"
+    task_tag = f"{data.name}-" if frames_task else ""  # Banking77 run names stay as they were
+    tag = f"{task_tag}{role}-{model.split('/')[-1].lower()}-{shots}shot{'' if constrained else '-free'}"
     out = Path(out_dir or f"runs/{tag}")
     meta = {
         "role": role,
@@ -123,7 +133,7 @@ def main(
         n = len(rows[s])
         acc = write_run(out, s, rows[s], result["preds"][start : start + n], meta)
         start += n
-        print(f"  {s:>7}: n={n:5d}  accuracy vs gold = {acc:.4f}")
+        print(f"  {s:>7}: n={n:5d}  {'exact match' if frames_task else 'accuracy'} vs gold = {acc:.4f}")
     print(
         f"load {result['load_seconds']:.0f}s, generate {result['gen_seconds']:.0f}s, "
         f"remote wall {wall:.0f}s; prompt tokens {result['prompt_tokens']}, output tokens {result['output_tokens']}"

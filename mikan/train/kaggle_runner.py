@@ -1,7 +1,9 @@
 """Kaggle kernel entry point (uploaded as the kernel's ``run.py``). Standard library only.
 
 Installs Unsloth, unpacks the Mikan bundle from the attached private dataset, and runs
-every SFT config in ``configs.json``. Kaggle's "GPU T4 x2" machine has two GPUs, so
+every config in ``configs.json`` (``"script": "sft"`` by default, or ``"grpo"``). A value
+starting with ``@`` is a path under ``/kaggle/working`` (e.g. ``"adapter": "@runs/<sft run>/best_adapter"``),
+so a GRPO run can start from an SFT run earlier in the same GPU queue. Kaggle's "GPU T4 x2" machine has two GPUs, so
 configs are split into one queue per GPU and the queues run in parallel threads.
 Outputs land in ``/kaggle/working/runs/<name>/`` and are downloaded with
 ``kaggle kernels output``.
@@ -52,8 +54,10 @@ def n_gpus() -> int:
 def to_flags(cfg: dict) -> list[str]:
     flags = []
     for key, value in cfg.items():
-        if key in ("name", "gpu"):
+        if key in ("name", "gpu", "script"):
             continue
+        if isinstance(value, str) and value.startswith("@"):
+            value = str(WORK / value[1:])
         flag = "--" + key.replace("_", "-")
         if value is True:
             flags.append(flag)
@@ -67,7 +71,10 @@ def run_queue(gpu: int, queue: list[dict], root: Path, results: list[dict]) -> N
     for cfg in queue:
         out = RUNS / cfg["name"]
         out.mkdir(parents=True, exist_ok=True)
-        cmd = [sys.executable, "-m", "mikan.train.sft", "--data", str(root / "data"), "--out", str(out.resolve()), *to_flags(cfg)]
+        script = cfg.get("script", "sft")
+        if script not in ("sft", "grpo"):
+            raise SystemExit(f"unknown script {script!r}")
+        cmd = [sys.executable, "-m", f"mikan.train.{script}", "--data", str(root / "data"), "--out", str(out.resolve()), *to_flags(cfg)]
         cwd = Path(f"/tmp/mikan-work-gpu{gpu}")  # libraries write caches relative to the working dir
         cwd.mkdir(parents=True, exist_ok=True)
         t0 = time.time()

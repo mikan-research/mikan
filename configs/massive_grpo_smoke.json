@@ -1,0 +1,9 @@
+[
+  {"name": "smoke-massive-sft-0.6b-gold-500", "gpu": 0, "model": "Qwen/Qwen3-0.6B", "task": "massive",
+   "targets": "gold", "n_train": 500, "epochs": 2, "eval_limit": 200},
+  {"name": "smoke-massive-grpo-0.6b-gold", "gpu": 0, "script": "grpo", "model": "Qwen/Qwen3-0.6B", "task": "massive",
+   "targets": "gold", "adapter": "@runs/smoke-massive-sft-0.6b-gold-500/best_adapter",
+   "n_prompts": 400, "prompt_offset": 500, "steps": 30, "eval_every": 15, "eval_limit": 200},
+  {"name": "smoke-massive-sft-1.7b-gold-500", "gpu": 1, "model": "Qwen/Qwen3-1.7B", "task": "massive",
+   "targets": "gold", "n_train": 500, "epochs": 2, "eval_limit": 200}
+]

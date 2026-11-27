@@ -23,6 +23,8 @@ class TaskConfig:
     secondary_metrics: tuple[str, ...] = ()
     labels_file: Path | None = None
     label_source: str = "unspecified"
+    kind: str = "labels"
+    slot_types_file: Path | None = None
     path: Path | None = None
     sha256: str | None = None
 
@@ -33,7 +35,7 @@ class TaskConfig:
         cfg = yaml.safe_load(raw_bytes) or {}
         known = {
             "name", "metric", "delta", "confidence", "power", "n_boot",
-            "seed", "secondary_metrics", "labels_file", "label_source",
+            "seed", "secondary_metrics", "labels_file", "label_source", "kind", "slot_types_file",
         }
         unknown = set(cfg) - known
         if unknown:
@@ -50,11 +52,23 @@ class TaskConfig:
         if not 0 < delta < 1:
             raise ValueError(f"{path}: delta must be in (0, 1) (a fraction, e.g. 0.02 for 2 points)")
 
-        labels_file = cfg.get("labels_file")
-        if labels_file is not None:
-            labels_file = Path(labels_file)
-            if not labels_file.is_absolute():
-                labels_file = (path.parent / labels_file).resolve()
+        kind = str(cfg.get("kind", "labels"))
+        if kind not in ("labels", "frames"):
+            raise ValueError(f"{path}: kind must be 'labels' or 'frames'")
+        if kind == "frames":
+            if cfg["metric"] != "accuracy" or cfg.get("secondary_metrics"):
+                raise ValueError(f"{path}: frames tasks use metric 'accuracy' (exact frame match) and no secondary metrics")
+            if "slot_types_file" not in cfg:
+                raise ValueError(f"{path}: frames tasks need slot_types_file")
+
+        def resolve(key: str) -> Path | None:
+            value = cfg.get(key)
+            if value is None:
+                return None
+            value = Path(value)
+            return value if value.is_absolute() else (path.parent / value).resolve()
+
+        labels_file = resolve("labels_file")
 
         return cls(
             name=str(cfg["name"]),
@@ -67,6 +81,8 @@ class TaskConfig:
             secondary_metrics=tuple(cfg.get("secondary_metrics", [])),
             labels_file=labels_file,
             label_source=str(cfg.get("label_source", "unspecified")),
+            kind=kind,
+            slot_types_file=resolve("slot_types_file"),
             path=path,
             sha256=hashlib.sha256(raw_bytes).hexdigest(),
         )

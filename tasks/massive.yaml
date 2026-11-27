@@ -1,0 +1,21 @@
+# Pre-registered evaluation for MASSIVE en-US frames (intent + slots). Fix these values before
+# any teacher or student output exists and do not change them afterwards; reports record this
+# file's SHA-256.
+
+name: massive-en-frames
+kind: frames                # outputs are JSON frames, scored by mikan.frames
+metric: accuracy            # = exact frame match (intent and every (slot type, value) pair)
+delta: 0.03                 # non-inferiority margin: 3 exact-match points (see the power note below)
+confidence: 0.95
+power: 0.8
+n_boot: 10000
+seed: 0
+
+# Power note: with 2,974 test items the smallest margin resolvable at 80% power is 1.6 / 2.0 /
+# 2.3 / 2.8 points at 10 / 15 / 20 / 30% teacher-student disagreement. Exact frame match is
+# stricter than intent accuracy, so disagreement is expected above 15%; 3 points keeps the
+# test powered up to ~30% disagreement.
+
+labels_file: ../data/massive/intents.txt
+slot_types_file: ../data/massive/slot_types.txt
+label_source: "MASSIVE v1.1 en-US official test split (dataset ground-truth frames)"

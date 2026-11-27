@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from ..tasks import TaskConfig
-from .data import align, load_labels, read_jsonl
+from .data import align_for_task, read_jsonl
 from .power import analytic_power, min_detectable_margin, required_n, simulated_power
 from .report import evaluate, write_report
 from .synthetic import exit_check
@@ -14,16 +14,12 @@ from .synthetic import exit_check
 
 def _cmd_report(args: argparse.Namespace) -> int:
     task = TaskConfig.load(args.task)
-    labels_path = args.labels or task.labels_file
-    if labels_path is None:
-        print("error: no labels file (set labels_file in the task config or pass --labels)", file=sys.stderr)
+    try:
+        al = align_for_task(task, read_jsonl(args.gold),
+                            {args.a_name: read_jsonl(args.a), args.b_name: read_jsonl(args.b)}, args.labels)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
         return 2
-    labels = load_labels(labels_path)
-    al = align(
-        read_jsonl(args.gold),
-        {args.a_name: read_jsonl(args.a), args.b_name: read_jsonl(args.b)},
-        labels,
-    )
     result = evaluate(al, task, a=args.a_name, b=args.b_name, n_examples=args.examples)
     json_path, md_path = write_report(result, args.out)
     p = result["primary"]

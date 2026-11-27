@@ -14,18 +14,17 @@ import json
 from pathlib import Path
 
 from ..tasks import TaskConfig
-from .data import align, load_labels, read_jsonl
+from .data import align_for_task, read_jsonl
 from .report import evaluate, write_report
 
 
 def summarise(runs_dir: Path, teacher_dir: Path, task_path: Path, gold_path: Path, out: Path) -> list[dict]:
     task = TaskConfig.load(task_path)
-    labels = load_labels(task.labels_file)
     gold = read_jsonl(gold_path)
     teacher = read_jsonl(teacher_dir / "golden_preds.jsonl")
     rows = []
     for run in sorted(p for p in runs_dir.iterdir() if (p / "golden_preds.jsonl").exists()):
-        al = align(gold, {"teacher": teacher, run.name: read_jsonl(run / "golden_preds.jsonl")}, labels)
+        al = align_for_task(task, gold, {"teacher": teacher, run.name: read_jsonl(run / "golden_preds.jsonl")})
         r = evaluate(al, task, a="teacher", b=run.name)
         write_report(r, out / run.name)
         meta = json.loads((run / "meta.json").read_text()) if (run / "meta.json").exists() else {}
@@ -46,7 +45,7 @@ def summarise(runs_dir: Path, teacher_dir: Path, task_path: Path, gold_path: Pat
             "decision": r["decision"],
             "train_seconds": meta.get("train_seconds"),
         })
-    teacher_acc = evaluate(align(gold, {"teacher": teacher, "t2": teacher}, labels), task, "teacher", "t2")["summary"]["teacher"]["accuracy"]
+    teacher_acc = evaluate(align_for_task(task, gold, {"teacher": teacher, "t2": teacher}), task, "teacher", "t2")["summary"]["teacher"]["accuracy"]
     (out / "summary.json").write_text(json.dumps({"teacher_accuracy": teacher_acc, "runs": rows}, indent=2) + "\n")
     (out / "summary.md").write_text(render(rows, teacher_acc, task.delta))
     return rows

@@ -3,8 +3,9 @@
     python -m mikan.train.sft --data <bundle>/data --model Qwen/Qwen3-1.7B \
         --targets teacher --epochs 3 --out runs/sft-qwen3-1.7b-teacher-full
 
-``--data`` must contain ``banking77/{labels.txt,train,val,golden}.jsonl`` and
-``teacher/train_preds.jsonl``.
+``--data`` must contain ``<task>/{train,val,golden}.jsonl`` (``--task``, default banking77)
+and ``<teacher-dir>/train_preds.jsonl``. A task dir with ``slot_types.txt`` is a frames
+task: targets are canonical frame JSON and val/golden are scored by exact frame match.
 After every epoch the model predicts val; the epoch with the best **val** accuracy is
 kept (its LoRA weights are saved), reloaded at the end, and only then used to predict
 golden, once. Golden accuracy never influences the choice.
@@ -13,19 +14,21 @@ golden, once. Golden accuracy never influences the choice.
 from __future__ import annotations
 
 import argparse
-import gc
 import json
 import shutil
 import time
 from pathlib import Path
 
 from ..intake.runs import write_run
-from .examples import attach_targets, nested_subset, read_jsonl, student_messages
+from .examples import load_task, nested_subset, student_messages
+from .gen import greedy
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="LoRA SFT of a student model")
     p.add_argument("--data", required=True)
+    p.add_argument("--task", default="banking77", help="subdir of --data")
+    p.add_argument("--teacher-dir", default="teacher", help="subdir of --data with the teacher's train_preds.jsonl")
     p.add_argument("--model", required=True)
     p.add_argument("--targets", choices=["teacher", "gold"], default="teacher")
     p.add_argument("--n-train", type=int, default=0, help="0 = all training rows")
@@ -55,11 +58,11 @@ def main(argv: list[str] | None = None) -> int:
     from transformers import TrainerCallback
     from trl import SFTConfig, SFTTrainer
 
-    train_rows = read_jsonl(data / "banking77" / "train.jsonl")
-    teacher = read_jsonl(data / "teacher" / "train_preds.jsonl") if args.targets == "teacher" else None
-    train = nested_subset(attach_targets(train_rows, args.targets, teacher), args.n_train, args.seed)
-    val = read_jsonl(data / "banking77" / "val.jsonl")
-    golden = read_jsonl(data / "banking77" / "golden.jsonl")
+    task = load_task(data, args.task, args.targets, args.teacher_dir)
+    kind = task["kind"]
+    train = nested_subset(task["train"], args.n_train, args.seed)
+    val, golden = task["val"], task["golden"]
+    max_new = 96 if kind == "frames" else 24
     if args.eval_limit:
         val, golden = val[: args.eval_limit], golden[: args.eval_limit]
 
@@ -81,37 +84,20 @@ def main(argv: list[str] | None = None) -> int:
     def prompt_text(text: str) -> str:
         # Same template vLLM applies at inference (Qwen3 with thinking disabled).
         return tok.apply_chat_template(
-            student_messages(text), tokenize=False, add_generation_prompt=True, enable_thinking=False
+            student_messages(text, kind), tokenize=False, add_generation_prompt=True, enable_thinking=False
         )
 
     dataset = Dataset.from_list(
         [{"prompt": prompt_text(r["text"]), "completion": r["target"] + end_of_turn} for r in train]
     )
 
-    @torch.no_grad()
     def predict(rows: list[dict]) -> list[str]:
-        gc.collect(); torch.cuda.empty_cache()  # drop training activations before decode buffers
-        FastLanguageModel.for_inference(model)
-        side = tok.padding_side
-        tok.padding_side = "left"
-        preds: list[str] = []
-        for i in range(0, len(rows), args.eval_batch):
-            prompts = [prompt_text(r["text"]) for r in rows[i : i + args.eval_batch]]
-            enc = tok(prompts, return_tensors="pt", padding=True, add_special_tokens=False).to(model.device)
-            gen = model.generate(
-                **enc, max_new_tokens=24, do_sample=False, use_cache=True, pad_token_id=tok.pad_token_id,
-            )
-            texts = tok.batch_decode(gen[:, enc["input_ids"].shape[1] :], skip_special_tokens=True)
-            preds += [t.strip().split("\n")[0].strip() for t in texts]
-        tok.padding_side = side
-        del enc, gen
-        gc.collect(); torch.cuda.empty_cache()
-        FastLanguageModel.for_training(model)
-        return preds
+        return greedy(model, tok, [prompt_text(r["text"]) for r in rows], args.eval_batch, max_new)
 
     history: list[dict] = []
     meta_base = {
-        "model": args.model, "targets": args.targets, "n_train": len(train), "epochs": args.epochs,
+        "model": args.model, "task": args.task, "kind": kind, "targets": args.targets, "n_train": len(train),
+        "dropped_invalid_targets": task["dropped_invalid_targets"], "epochs": args.epochs,
         "lr": args.lr, "rank": args.rank, "batch": args.batch, "load_in_4bit": args.load_in_4bit,
         "seed": args.seed, "eval_limit": args.eval_limit, "gpu": torch.cuda.get_device_name(0),
     }

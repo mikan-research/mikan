@@ -1,0 +1,30 @@
+{
+  "data": "massive",
+  "tp": 2,
+  "candidates": [
+    {
+      "model": "JunHowie/Qwen3-30B-A3B-Instruct-2507-GPTQ-Int4"
+    },
+    {
+      "model": "Qwen/Qwen3-14B-AWQ"
+    }
+  ],
+  "probe": {
+    "splits": "smoke",
+    "shots": 1
+  },
+  "runs": [
+    {
+      "name": "massive-teacher-1shot",
+      "splits": "pilot",
+      "shots": 1
+    },
+    {
+      "name": "massive-teacher-3shot",
+      "splits": "pilot",
+      "shots": 3
+    }
+  ],
+  "attention_backend": "TRITON_ATTN",
+  "note": "compressed-tensors AWQ builds need Marlin (sm80+) and fail on T4; FlashInfer JIT fails to link on Kaggle, so Triton attention"
+}

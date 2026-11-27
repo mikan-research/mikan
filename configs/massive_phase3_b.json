@@ -1,0 +1,6 @@
+[
+  {"name": "sft-massive-0.6b-teacher-full", "gpu": 0, "model": "Qwen/Qwen3-0.6B", "task": "massive", "teacher_dir": "massive-teacher", "targets": "teacher"},
+  {"name": "grpo-massive-0.6b-from-full", "gpu": 0, "script": "grpo", "model": "Qwen/Qwen3-0.6B", "task": "massive", "teacher_dir": "massive-teacher", "targets": "teacher", "adapter": "@runs/sft-massive-0.6b-teacher-full/best_adapter", "n_prompts": 3000, "steps": 250, "eval_every": 50},
+  {"name": "sft-massive-1.7b-teacher-1000", "gpu": 1, "model": "Qwen/Qwen3-1.7B", "task": "massive", "teacher_dir": "massive-teacher", "targets": "teacher", "n_train": 1000, "eval_batch": 96},
+  {"name": "grpo-massive-1.7b-from-1000", "gpu": 1, "script": "grpo", "model": "Qwen/Qwen3-1.7B", "task": "massive", "teacher_dir": "massive-teacher", "targets": "teacher", "adapter": "@runs/sft-massive-1.7b-teacher-1000/best_adapter", "n_prompts": 3000, "prompt_offset": 1000, "steps": 250, "eval_every": 50, "eval_batch": 96}
+]

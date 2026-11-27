@@ -1,0 +1,11 @@
+{
+  "data": "massive",
+  "tp": 2,
+  "attention_backend": "TRITON_ATTN",
+  "candidates": [{"model": "JunHowie/Qwen3-30B-A3B-Instruct-2507-GPTQ-Int4"}],
+  "probe": {"splits": "smoke", "retrieved": 20, "shots": 0},
+  "runs": [
+    {"name": "massive-teacher-knn20", "splits": "pilot", "retrieved": 20},
+    {"name": "massive-teacher-knn8", "splits": "pilot", "retrieved": 8}
+  ]
+}

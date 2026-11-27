@@ -44,14 +44,18 @@ def test_student_prompt_is_short():
 def test_runner_flags():
     cfg = {"name": "x", "gpu": 1, "model": "Qwen/Qwen3-1.7B", "n_train": 500, "load_in_4bit": True, "eval_limit": None}
     assert to_flags(cfg) == ["--model", "Qwen/Qwen3-1.7B", "--n-train", "500", "--load-in-4bit"]
+    g = {"name": "g", "script": "grpo", "adapter": "@runs/sft-a/best_adapter"}
+    assert to_flags(g) == ["--adapter", "/kaggle/working/runs/sft-a/best_adapter"]
 
 
-@pytest.mark.parametrize("configs", ["configs/sft_smoke.json", "configs/sft_phase2.json", "configs/sft_phase2_4b.json"])
-def test_configs_parse_into_sft_arguments(configs):
-    from mikan.train.sft import parse_args
+@pytest.mark.parametrize("configs", ["configs/sft_smoke.json", "configs/sft_phase2.json", "configs/sft_phase2_4b.json",
+                                     "configs/massive_grpo_smoke.json", "configs/massive_phase3_a.json", "configs/massive_phase3_b.json"])
+def test_configs_parse_into_trainer_arguments(configs):
+    import importlib
 
     for cfg in json.loads((REPO / configs).read_text()):
-        args = parse_args(["--data", "d", "--out", "o", *to_flags(cfg)])
+        mod = importlib.import_module(f"mikan.train.{cfg.get('script', 'sft')}")
+        args = mod.parse_args(["--data", "d", "--out", "o", *to_flags(cfg)])
         assert args.model == cfg["model"] and args.targets == cfg["targets"]
 
 
@@ -66,3 +70,72 @@ def test_bundle_contents(tmp_path, monkeypatch):
     assert {"mikan/train/sft.py", "mikan/intake/runs.py", "configs.json", "data/teacher/train_preds.jsonl",
             "data/banking77/golden.jsonl"} <= names
     assert len(info["commit"]) == 40
+
+
+def test_teacher_bundle(tmp_path):
+    if not (REPO / "data" / "massive" / "golden.jsonl").exists():
+        pytest.skip("MASSIVE not prepared")
+    path = kaggle_job.build_bundle(REPO / "configs" / "teacher_massive_pilot.json", tmp_path, ("massive",), with_teacher=False)
+    with tarfile.open(path) as tar:
+        names = set(tar.getnames())
+    assert {"mikan/intake/kaggle_teacher.py", "mikan/frames.py", "data/massive/slot_types.txt",
+            "data/massive/fewshot.jsonl", "data/massive/golden.jsonl"} <= names
+    assert not any(n.startswith("data/teacher/") or "raw" in n for n in names)
+
+
+def test_vllm_cli_args_parse():
+    import ast
+    src = (REPO / "mikan" / "intake" / "kaggle_teacher.py").read_text()
+    ast.parse(src)  # uploaded verbatim as the kernel script
+    assert "mikan.intake.vllm_predict" in src
+
+
+def test_frame_targets_and_task_loading(tmp_path):
+    from mikan.frames import parse
+    from mikan.train.examples import attach_frame_targets, load_task, seeded_order, student_messages
+
+    frame = {"intent": "alarm_set", "slots": [{"type": "time", "value": "nine am"}]}
+    rows = [{"id": "a", "text": "wake me at nine am", "label": "alarm_set", "frame": frame},
+            {"id": "b", "text": "quiet", "label": "audio_volume_mute", "frame": {"intent": "audio_volume_mute", "slots": []}}]
+    gold, dropped = attach_frame_targets(rows, "gold")
+    assert dropped == 0 and parse(gold[0]["target"]) == frame
+    teacher = [{"id": "a", "pred": json.dumps(frame)}, {"id": "b", "pred": "not json"}]
+    t, dropped = attach_frame_targets(rows, "teacher", teacher, {"alarm_set", "audio_volume_mute"}, {"time"})
+    assert dropped == 1 and [r["id"] for r in t] == ["a"]
+
+    d = tmp_path / "massive"
+    d.mkdir()
+    for name in ("train", "val", "golden"):
+        (d / f"{name}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    (d / "intents.txt").write_text("alarm_set\naudio_volume_mute\n")
+    (d / "slot_types.txt").write_text("time\n")
+    task = load_task(tmp_path, "massive", "gold")
+    assert task["kind"] == "frames" and len(task["train"]) == 2
+    assert "JSON" in student_messages("x", "frames")[0]["content"]
+    assert seeded_order(ROWS, 3)[:10] == nested_subset(ROWS, 10, seed=3)
+
+
+def test_grpo_rewards():
+    from mikan.train.grpo import make_rewards
+
+    frame_r, valid_r, grounded_r = make_rewards({"alarm_set"}, {"time"})
+    ref = json.dumps({"intent": "alarm_set", "slots": [{"type": "time", "value": "nine am"}]})
+    good = ref
+    invented = json.dumps({"intent": "alarm_set", "slots": [{"type": "time", "value": "ten pm"}]})
+    kw = dict(ref=[ref] * 3, text=["wake me at nine am"] * 3)
+    r = frame_r([good, invented, "garbage"], **kw)
+    assert r[0] == pytest.approx(1.0) and r[1] == pytest.approx(0.4) and r[2] == 0.0
+    assert valid_r([good, invented, "garbage"]) == [1.0, 1.0, 0.0]
+    assert grounded_r([good, invented, "garbage"], text=kw["text"]) == [1.0, 0.0, 0.0]
+    # conversational completions are accepted too
+    assert frame_r([[{"role": "assistant", "content": good}]], ref=[ref], text=["wake me at nine am"]) == [pytest.approx(1.0)]
+
+
+@pytest.mark.parametrize("module", ["mikan.train.sft", "mikan.train.grpo"])
+def test_trainer_cli_parses(module):
+    import importlib
+
+    mod = importlib.import_module(module)
+    extra = ["--adapter", "a"] if module.endswith("grpo") else []
+    args = mod.parse_args(["--data", "d", "--out", "o", "--model", "m", *extra])
+    assert args.out == "o"
