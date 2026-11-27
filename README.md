@@ -1,4 +1,6 @@
-# Mikan
+<p align="center"><img src="docs/assets/logo.svg" alt="Mikan logo: a large mandarin beside a small one" width="128" height="128"></p>
+
+<h1 align="center">Mikan</h1>
 
 Distil a large model's behaviour on one narrow task into a small open model, and prove statistically that it is not worse.
 

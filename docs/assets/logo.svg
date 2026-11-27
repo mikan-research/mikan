@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="peel" cx="38%" cy="34%" r="70%">
+      <stop offset="0%" stop-color="#FFB347"/>
+      <stop offset="55%" stop-color="#F7871E"/>
+      <stop offset="100%" stop-color="#E0620B"/>
+    </radialGradient>
+    <radialGradient id="peel2" cx="38%" cy="34%" r="70%">
+      <stop offset="0%" stop-color="#FFC266"/>
+      <stop offset="55%" stop-color="#F99530"/>
+      <stop offset="100%" stop-color="#E5700F"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#13182B"/>
+  <!-- teacher: large mikan -->
+  <g>
+    <path d="M214 132 C 214 116, 220 104, 230 96" stroke="#7A5A2E" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <path d="M226 112 C 258 72, 318 74, 338 98 C 308 126, 256 132, 226 112 Z" fill="#4FA34A"/>
+    <path d="M232 110 C 266 98, 300 94, 330 99" stroke="#2F7A33" stroke-width="5" stroke-linecap="round" fill="none"/>
+    <circle cx="214" cy="282" r="152" fill="url(#peel)"/>
+    <ellipse cx="160" cy="222" rx="46" ry="30" transform="rotate(-35 160 222)" fill="#FFFFFF" opacity="0.28"/>
+    <circle cx="214" cy="138" r="7" fill="#7A5A2E"/>
+  </g>
+  <!-- student: small mikan -->
+  <g>
+    <path d="M394 324 C 394 316, 397 310, 402 306" stroke="#7A5A2E" stroke-width="6" stroke-linecap="round" fill="none"/>
+    <path d="M400 314 C 416 294, 446 295, 456 307 C 441 321, 415 324, 400 314 Z" fill="#4FA34A"/>
+    <circle cx="394" cy="388" r="64" fill="url(#peel2)"/>
+    <ellipse cx="372" cy="364" rx="19" ry="12" transform="rotate(-35 372 364)" fill="#FFFFFF" opacity="0.3"/>
+  </g>
+</svg>
