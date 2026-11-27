@@ -56,8 +56,8 @@ These are what make a Mikan result mean something. PRs that break them will be a
 
 ## Code of conduct
 
-Be respectful and assume good faith. Harassment or personal attacks are not tolerated; maintainers may remove
-comments or contributions that cross that line.
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). Report unacceptable behaviour privately to
+mikan.research@gmail.com; reports are kept confidential.
 
 ## Licence
 
