@@ -11,7 +11,7 @@ Mikan takes a task handled by a large teacher model (classification, extraction,
 | 0 | Eval harness: bootstrap CI, McNemar, non-inferiority, power, reports | Done |
 | 1 | Banking77 teacher labels (open model on Modal) and zero-shot baselines | Done |
 | 2 | SFT distillation (LoRA) with data-size and model-size ablations | Done |
-| 3 | GRPO with programmatic rewards | Next |
+| 3 | GRPO with programmatic rewards, on MASSIVE en-US frames | Done |
 | 4 | Quantization (AWQ/GPTQ) and vLLM serving benchmark | Planned |
 | 5 | Generalise: new tasks from a config only | Planned |
 
@@ -54,6 +54,70 @@ No untrained student is within the 2-point margin; closing that gap is the job o
 
 Per-run reports: `reports/phase2/` (not tracked).
 
+## Second task: MASSIVE en-US frames (Phase 3)
+
+Banking77 has no reward a program can check without ground truth, so GRPO uses a structured-output task:
+parse a voice-assistant request into a JSON frame.
+
+```json
+{"intent": "alarm_set", "slots": [{"type": "time", "value": "nine am"}, {"type": "date", "value": "friday"}]}
+```
+
+- MASSIVE v1.1 en-US (Amazon, CC-BY-4.0): 60 intents, 55 slot types; train 11,255, val 2,026 (official dev), golden
+  2,974 (official test, ground truth).
+- Pre-registered in [`tasks/massive.yaml`](tasks/massive.yaml): exact frame match, **δ = 3 points** (chosen on test-set
+  power before any output existed).
+- `mikan/frames.py` checks every output the same way for evaluation and reward: exact JSON shape, intent and slot types
+  in the schema, slot values copied from the input, exact match on the (type, value) multiset.
+- GRPO reward against the **teacher's** frame (never golden): 0 if invalid, else 0.1 + 0.3·intent + 0.6·slot F1·groundedness.
+
+**Teacher:** Qwen3-30B-A3B-Instruct (4-bit GPTQ) on Kaggle T4 x2 with vLLM, decoding constrained to the frame schema.
+Prompt pilot on the same 300 val items:
+
+| Prompt | Exact frame match |
+|---|---|
+| 1 example per intent (fixed) | 44.7% |
+| 3 per intent (fixed) | 48.0% |
+| **8 retrieved nearest examples** | **67.0%** |
+| 20 retrieved nearest examples | 68.0% |
+
+Retrieved examples (`mikan.data.retrieve`, TF-IDF neighbours; never the item itself, never val or golden) fix most
+fixed-prompt errors, which were MASSIVE annotation conventions. Full run with 8 examples: **64.4%** exact match on golden
+(train 63.7%, val 64.9%); every train and val frame is valid, one golden output was cut off at the token limit.
+
+## Phase 3 results (golden set, 2,974 items, teacher 64.4%, δ = 3)
+
+| Student | Training | Golden exact match | Gap vs teacher [95% CI] | Valid | Decision |
+|---|---|---|---|---|---|
+| Qwen3-0.6B | SFT, 11,255 teacher frames | 64.1% | +0.3 [−1.3, +1.9] | 99.7% | PASS |
+| Qwen3-0.6B | + GRPO (best at step 200) | 64.8% | −0.4 [−2.1, +1.2] | 99.6% | PASS |
+| Qwen3-1.7B | SFT, 11,255 teacher frames | 65.0% | −0.6 [−2.2, +1.0] | 99.8% | PASS |
+| Qwen3-1.7B | + GRPO (best at step 200) | **65.7%** | −1.3 [−2.9, +0.3] | 99.7% | PASS |
+| Qwen3-1.7B | SFT, 1,000 teacher frames | 46.0% | +18.4 [+16.5, +20.3] | 95.3% | FAIL |
+| Qwen3-1.7B | + GRPO on 3,000 unseen prompts | 50.4% | +14.0 [+12.0, +15.9] | 97.2% | FAIL |
+| Qwen3-1.7B | SFT, 11,255 ground-truth frames | 72.1% | −7.8 [−9.4, −6.1] | 99.8% | PASS |
+
+| Pair (same golden items) | GRPO − SFT [95% CI] | Right only after / only before | McNemar p |
+|---|---|---|---|
+| 0.6B, full SFT | +0.7 [+0.0, +1.5] | 71 / 49 | 0.055 |
+| 1.7B, full SFT | +0.7 [−0.0, +1.5] | 72 / 51 | 0.071 |
+| 1.7B, 1k SFT | **+4.4 [+3.1, +5.8]** | 282 / 150 | 2e-10 |
+
+- **Distillation passes on structured output too.** SFT on teacher frames alone passes at both sizes; the 1.7B
+  slightly beats the teacher (65.0 vs 64.4%) with a short prompt that has no intent or slot lists.
+- **GRPO helps most when labelled data is scarce.** After a full SFT it adds +0.7 points (borderline, p ≈ 0.06);
+  after a 1k SFT it adds +4.4 points (p = 2e-10) using only the teacher frames of 3,000 new prompts as reward
+  references, still far from passing.
+- **What GRPO changes:** fewer slots (1k run: 3,090 → 2,704 emitted on golden), higher slot precision, and fewer
+  invented labels (171 → 97 unknown intents or slot types such as `number`, `quantity`, `music_remove`). Validity and
+  groundedness stay flat or improve; no extra text, no invented spans. Reward peaked mid-run (1k run: 0.59 → 0.83 at
+  step 130 → 0.64 at 250), and val selection kept steps 200–250.
+- **Labels are still the ceiling:** ground-truth SFT reaches 72.1% vs 65.0% on teacher labels, a bigger gap than
+  anything GRPO closes.
+- Remaining invalid outputs are invented labels; serving with the frame JSON schema (constrained decoding) removes
+  them by construction (Phase 4).
+
+
 ## Install
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
@@ -74,6 +138,15 @@ uv run modal run -m mikan.intake.modal_predict --role student --model Qwen/Qwen3
 
 Model weights download once into a Modal Volume on a CPU container, so GPUs never bill for downloads.
 
+MASSIVE (teacher on Kaggle T4 x2; `--runner teacher` uses `mikan/intake/kaggle_teacher.py`):
+
+```bash
+uv run python -m mikan.data.massive --out data/massive
+uv run python -m mikan.data.retrieve --data data/massive
+uv run python -m mikan.train.kaggle_job push --configs configs/teacher_massive_knn_pilot.json \
+    --job mikan-teacher-massive-knn --runner teacher --data massive
+```
+
 ## SFT on Kaggle
 
 ```bash
@@ -84,7 +157,24 @@ uv run python -m mikan.eval.sweep --runs runs/kaggle/mikan-sft-phase2/runs \
     --teacher runs/teacher-qwen3-30b-a3b-instruct-2507-fp8-10shot --out reports/phase2
 ```
 
-`push` bundles the code, prepared splits, cached teacher labels and configs into a private Kaggle dataset and starts a private T4 x2 kernel; each GPU runs its own queue of configs. `mikan.train.sft` can also be run directly on any single GPU.
+`push` bundles the code, prepared splits, cached teacher labels and configs into a private Kaggle dataset and starts a private T4 x2 kernel; each GPU runs its own queue of configs. A config with `"script": "grpo"` runs `mikan.train.grpo`, and `"adapter": "@runs/<sft run>/best_adapter"` starts it from an SFT run earlier in the same GPU queue. `mikan.train.sft` and `mikan.train.grpo` also run directly on any single GPU.
+
+MASSIVE grid (two kernels in parallel):
+
+```bash
+for k in a b; do uv run python -m mikan.train.kaggle_job push --configs configs/massive_phase3_$k.json \
+    --job mikan-massive-phase3-$k --data massive,massive-teacher --dataset mikan-bundle-phase3$k; done
+```
+
+## Backups
+
+Adapters and labels are backed up to **private** Hugging Face repos (`mikan/publish_hf.py`; it refuses to upload to a
+repo that is already public):
+
+```bash
+uv run --with huggingface_hub python -m mikan.publish_hf stage [--task massive]
+uv run --with huggingface_hub python -m mikan.publish_hf upload [--task massive]
+```
 
 ## Eval harness
 
@@ -126,6 +216,10 @@ uv run mikan-eval power --n 3080 --disagreement 0.08 --delta 0.02
 
 The disagreement rate is the share of items where exactly one of the two systems is right. Power depends on it, not on overall accuracy.
 
+Frames tasks (`kind: frames`) take gold records with a `"frame"` and score exact frame match, adding intent accuracy,
+slot F1, validity and groundedness to the report. `python -m mikan.eval.sweep --task ... --teacher ... --runs ...`
+evaluates a directory of runs in one table.
+
 **Run the synthetic self-check** (students with known gaps around δ):
 
 ```bash
@@ -145,17 +239,19 @@ uv run mikan-eval selfcheck
 ```text
 mikan/
   eval/        metrics, paired statistics, power, synthetic data, reports, CLI
-  data/        dataset preparation (Banking77 splits, leakage checks)
-  intake/      teacher/student batch prediction with vLLM, locally or on Modal
-  train/       LoRA SFT (Unsloth + TRL) and the Kaggle job driver
-  prompts.py   shared prompt construction
+  data/        dataset preparation (Banking77, MASSIVE; leakage checks) and retrieval of nearest examples
+  intake/      batch prediction with vLLM, locally, on Modal or on Kaggle (teacher runner)
+  train/       LoRA SFT and GRPO (Unsloth + TRL), and the Kaggle job driver
+  frames.py    frame checks, metrics and GRPO reward
+  prompts.py   teacher prompt construction (labels, frames, retrieved examples)
   tasks.py     task config loader
+  publish_hf.py  private Hugging Face backups
 tasks/         pre-registered task configs
-configs/       SFT run grids
+configs/       Kaggle run grids (SFT, GRPO, teacher)
 tests/         unit tests and the synthetic exit check
 ```
 
-Planned modules: GRPO in `train/`, `serve/` (quantization, vLLM), `monitor/` (drift and re-evaluation).
+Planned modules: `serve/` (quantization, vLLM), `monitor/` (drift and re-evaluation).
 
 ## Conventions
 
