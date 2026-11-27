@@ -12,7 +12,6 @@ build/
 /reports/
 
 # local-only project notes
-/docs/
 /CLAUDE.md
 
 # local build artefacts (Kaggle bundles)

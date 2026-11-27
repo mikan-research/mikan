@@ -4,6 +4,10 @@ Distil a large model's behaviour on one narrow task into a small open model, and
 
 Mikan takes a task handled by a large teacher model (classification, extraction, structured output), trains a small student (0.6B to 4B) to do the same job, quantizes and serves it, and judges it with a **pre-registered non-inferiority test**: the student passes only if the 95% CI for (teacher − student) stays below a margin δ fixed before training.
 
+- **Models and data:** [huggingface.co/mikan-research](https://huggingface.co/mikan-research): 9 LoRA adapters, teacher labels and every run's predictions for both tasks.
+- **Docs:** [`docs/`](docs/README.md): method, setup and results per task, roadmap, risks.
+- **Contributing:** new tasks, results and code are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Licence: Apache-2.0.
+
 ## Status
 
 | Phase | What | State |
@@ -166,15 +170,29 @@ for k in a b; do uv run python -m mikan.train.kaggle_job push --configs configs/
     --job mikan-massive-phase3-$k --data massive,massive-teacher --dataset mikan-bundle-phase3$k; done
 ```
 
-## Backups
+## Models and data on Hugging Face
 
-Adapters and labels are backed up to **private** Hugging Face repos (`mikan/publish_hf.py`; it refuses to upload to a
-repo that is already public):
+Everything trained or labelled here is in the [mikan-research](https://huggingface.co/mikan-research) organization:
+
+| Task | Models (LoRA adapters) | Dataset |
+|---|---|---|
+| Banking77 | `banking77-qwen3-{0.6b,1.7b,4b}-lora`, `banking77-qwen3-{1.7b,4b}-gold-lora` | `banking77-distill` |
+| MASSIVE en-US | `massive-qwen3-{1.7b,0.6b}-grpo-lora`, `massive-qwen3-1.7b-sft-lora`, `massive-qwen3-1.7b-gold-lora` | `massive-distill` |
+
+Each model card has the golden result with its confidence interval, the training recipe and a usage snippet. The
+datasets hold the splits, teacher labels and every run's predictions, so a new student can be trained or compared
+without re-running a teacher. `mikan/publish_hf.py` stages and uploads them; updating a public repo needs
+`--allow-public`.
 
 ```bash
 uv run --with huggingface_hub python -m mikan.publish_hf stage [--task massive]
-uv run --with huggingface_hub python -m mikan.publish_hf upload [--task massive]
+uv run --with huggingface_hub python -m mikan.publish_hf upload [--task massive] [--allow-public]
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The short version: pre-register a task's margin before any outputs exist,
+never use teacher outputs as golden labels, choose everything on the val split, and report failures as well as passes.
 
 ## Eval harness
 
@@ -245,10 +263,11 @@ mikan/
   frames.py    frame checks, metrics and GRPO reward
   prompts.py   teacher prompt construction (labels, frames, retrieved examples)
   tasks.py     task config loader
-  publish_hf.py  private Hugging Face backups
+  publish_hf.py  Hugging Face publishing (mikan-research)
 tasks/         pre-registered task configs
 configs/       Kaggle run grids (SFT, GRPO, teacher)
 tests/         unit tests and the synthetic exit check
+docs/          method, per-task setup and results, roadmap, risks
 ```
 
 Planned modules: `serve/` (quantization, vLLM), `monitor/` (drift and re-evaluation).
@@ -258,4 +277,4 @@ Planned modules: `serve/` (quantization, vLLM), `monitor/` (drift and re-evaluat
 - System `a` is the teacher and `b` the student. Every difference is `a − b`, so positive means the student is worse.
 - Golden labels are verified ground truth, never teacher outputs.
 - The quantized model is the one evaluated, because it is the one served.
-- Datasets, teacher outputs, runs and reports stay out of git.
+- Datasets, teacher outputs, runs and reports stay out of git; they are published on Hugging Face.

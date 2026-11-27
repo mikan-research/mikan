@@ -2,6 +2,8 @@
 name = "mikan"
 version = "0.0.1"
 description = "Distil a large model's behaviour on one narrow task into a small open model, with a pre-registered non-inferiority evaluation."
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
