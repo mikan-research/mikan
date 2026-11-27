@@ -2,7 +2,7 @@
 
     uv run --with huggingface_hub python -m mikan.publish_hf stage    # writes build/hf/
     uv run --with huggingface_hub python -m mikan.publish_hf upload   # creates private repos, uploads
-    uv run --with huggingface_hub python -m mikan.publish_hf stage --task massive   # MASSIVE dataset repo
+    uv run --with huggingface_hub python -m mikan.publish_hf stage --task massive   # MASSIVE adapters + dataset
     uv run --with huggingface_hub python -m mikan.publish_hf upload --task massive
 
 ``stage`` copies each kept adapter plus its run metadata into ``build/hf/<repo>/`` and
@@ -17,7 +17,7 @@ import json
 import shutil
 from pathlib import Path
 
-from .train.examples import STUDENT_SYSTEM
+from .train.examples import STUDENT_FRAMES_SYSTEM, STUDENT_SYSTEM
 
 REPO = Path(__file__).resolve().parents[1]
 RUNS = REPO / "runs" / "kaggle" / "mikan-sft-phase2" / "runs"
@@ -206,7 +206,10 @@ request into `{{"intent", "slots": [{{"type", "value"}}]}}` (60 intents, 55 slot
   retrieves itself and val/golden are never in the pool).
 - `teacher/`: frames from `JunHowie/Qwen3-30B-A3B-Instruct-2507-GPTQ-Int4` (vLLM 0.13, 2x T4, fp16, decoding
   constrained to the frame JSON schema) prompted with the 8 retrieved examples per item. Exact frame match vs
-  ground truth: train {pct(teacher['train'])}%, val {pct(teacher['val'])}%, golden {pct(teacher['golden'])}%. 100% valid frames.
+  ground truth: train {pct(teacher['train'])}%, val {pct(teacher['val'])}%, golden {pct(teacher['golden'])}%. Every train and
+  val frame is valid; one golden output (of 2,974) was cut off at the 160-token limit and counts as wrong.
+- `students/<run>/`: per-checkpoint validation and final golden predictions plus `meta.json` for every Phase 3 SFT
+  and GRPO run; `summary.json` is the sweep against the teacher.
 - `pilots/`: the prompt pilot on the same 300 val items, kept as the record of how the prompt was chosen:
 
 | Prompt | Exact frame match |
@@ -216,6 +219,110 @@ request into `{{"intent", "slots": [{{"type", "value"}}]}}` (60 intents, 55 slot
 Derived from MASSIVE v1.1 (Amazon, CC-BY-4.0): FitzGerald et al., 2022, "MASSIVE: A 1M-Example Multilingual
 Natural Language Understanding Dataset with 51 Typologically-Diverse Languages". Annotator ids were dropped.
 """
+
+
+MASSIVE_RUNS = REPO / "runs" / "phase3"
+MASSIVE_SUMMARY = REPO / "reports" / "phase3" / "summary.json"
+MASSIVE_MODELS = {  # run name -> repo name
+    "grpo-massive-1.7b-from-full": "mikan-massive-qwen3-1.7b-grpo-lora",
+    "grpo-massive-0.6b-from-full": "mikan-massive-qwen3-0.6b-grpo-lora",
+    "sft-massive-1.7b-teacher-full": "mikan-massive-qwen3-1.7b-sft-lora",
+    "sft-massive-1.7b-gold-full": "mikan-massive-qwen3-1.7b-gold-lora",
+}
+
+
+def massive_model_card(user: str, row: dict, teacher_acc: float) -> str:
+    meta = json.loads((MASSIVE_RUNS / row["run"] / "meta.json").read_text())
+    base, repo = meta["model"], MASSIVE_MODELS[row["run"]]
+    grpo = row["run"].startswith("grpo")
+    if grpo:
+        sft_run = Path(meta["adapter"]).parent.name
+        sft_meta = json.loads((MASSIVE_RUNS / sft_run / "meta.json").read_text())
+        how = (f"LoRA SFT on {sft_meta['n_train']:,} teacher frames ({sft_meta['epochs']} epochs, lr {sft_meta['lr']}), then GRPO "
+               f"continuing the same adapter: {meta['steps']} steps, {meta['num_generations']} samples per prompt, "
+               f"{meta['prompts_per_step']} prompts per step, {meta['n_prompts']:,} prompts, lr {meta['lr']}, temperature "
+               f"{meta['temperature']}, beta 0 (no KL). Reward against the teacher's frame: 0 if invalid, else "
+               f"0.1 + 0.3 x intent match + 0.6 x slot F1 x groundedness. Checkpoint chosen on val exact match "
+               f"(step 0 = the SFT adapter was a candidate): step {meta['best_step']}.")
+        labels = "teacher frames (SFT), then GRPO with the teacher frame as reward reference"
+    else:
+        how = (f"LoRA SFT, r={meta['rank']}, alpha={2 * meta['rank']}, all linear projections, lr {meta['lr']} cosine, "
+               f"{meta['epochs']} epochs, batch {meta['batch']}, fp16, 8-bit AdamW, loss on the completion only. "
+               f"Checkpoint chosen on val exact match: epoch {meta['best_epoch']}.")
+        labels = "teacher frames" if meta["targets"] == "teacher" else "MASSIVE ground-truth frames"
+    return f"""---
+base_model: {base}
+library_name: peft
+license: apache-2.0
+datasets:
+- AmazonScience/massive
+- {user}/{MASSIVE_DATASET}
+pipeline_tag: text-generation
+tags:
+- lora
+- distillation
+- grpo
+- semantic-parsing
+- slot-filling
+---
+
+# {base.split('/')[-1]} LoRA for MASSIVE en-US frames{' (SFT + GRPO)' if grpo else ''}
+
+LoRA adapter for `{base}` that parses a voice-assistant request into a JSON frame
+`{{"intent": ..., "slots": [{{"type": ..., "value": ...}}]}}` (60 intents, 55 slot types), trained on {labels}.
+Part of Mikan, a pipeline that distils a large model's behaviour on one narrow task into a small model and tests
+non-inferiority with a pre-registered margin.
+
+## Results (MASSIVE en-US test split, 2,974 items, ground-truth frames)
+
+| | Exact frame match |
+|---|---|
+| This adapter | {pct(row['golden_accuracy'])}% |
+| Teacher (Qwen3-30B-A3B-Instruct-2507, 4-bit GPTQ, 8 retrieved examples) | {pct(teacher_acc)}% |
+
+Gap (teacher - student): {pct(row['gap'])} points, 95% paired bootstrap CI [{pct(row['gap_low'])}, {pct(row['gap_high'])}].
+Non-inferiority margin 3 points: **{row['decision']}**. Valid frames {pct(row['validity'])}% (nearly all of the rest use an intent
+or slot type outside the schema, which constrained decoding removes). Exact match requires the intent and every
+(slot type, value) pair to equal gold.
+
+## Usage
+
+The prompt is a short system message with no intent or slot lists; thinking is off.
+
+```python
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+tok = AutoTokenizer.from_pretrained("{user}/{repo}")
+model = PeftModel.from_pretrained(AutoModelForCausalLM.from_pretrained("{base}", torch_dtype="auto"), "{user}/{repo}")
+messages = [{{"role": "system", "content": "{STUDENT_FRAMES_SYSTEM}"}},
+            {{"role": "user", "content": "wake me up at nine am on friday"}}]
+ids = tok.apply_chat_template(messages, add_generation_prompt=True, enable_thinking=False, return_tensors="pt")
+print(tok.decode(model.generate(ids, max_new_tokens=96, do_sample=False)[0, ids.shape[1]:], skip_special_tokens=True))
+```
+
+## Training
+
+{how} Unsloth 2026.11.12 + TRL 1.19.0 on one Tesla T4. `meta.json` has the per-checkpoint validation scores{' and the reward log' if grpo else ''}.
+
+MASSIVE (Amazon, CC-BY-4.0): FitzGerald et al., 2022, "MASSIVE: A 1M-Example Multilingual Natural Language
+Understanding Dataset with 51 Typologically-Diverse Languages".
+"""
+
+
+def stage_massive_models(user: str) -> None:
+    summary = json.loads(MASSIVE_SUMMARY.read_text())
+    rows = {r["run"]: r for r in summary["runs"]}
+    for run, repo in MASSIVE_MODELS.items():
+        d = STAGE / repo
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+        for f in ADAPTER_FILES:
+            shutil.copy(MASSIVE_RUNS / run / "best_adapter" / f, d / f)
+        shutil.copy(MASSIVE_RUNS / run / "meta.json", d / "meta.json")
+        (d / "README.md").write_text(massive_model_card(user, rows[run], summary["teacher_accuracy"]))
+    print(f"staged {len(MASSIVE_MODELS)} MASSIVE adapters in {STAGE}/")
 
 
 def stage_massive() -> None:
@@ -239,6 +346,13 @@ def stage_massive() -> None:
         for kind in ("preds.jsonl", "meta.json"):
             shutil.copy(run / f"pilot_{kind}", out / f"pilot_{kind}")
         pilots[name] = json.loads((run / "pilot_meta.json").read_text())["accuracy_vs_gold"]
+    if MASSIVE_SUMMARY.exists():
+        for run in sorted(p.name for p in MASSIVE_RUNS.iterdir()):
+            out = d / "students" / run
+            out.mkdir(parents=True)
+            for f in (MASSIVE_RUNS / run).glob("*.json*"):
+                shutil.copy(f, out / f.name)
+        shutil.copy(MASSIVE_SUMMARY, d / "summary.json")
     (d / "README.md").write_text(massive_card(teacher, pilots))
     print(f"staged {d}/")
 
@@ -248,7 +362,7 @@ def upload(user: str, task: str = "banking77") -> None:
 
     api = HfApi()
     if task == "massive":
-        targets = [(MASSIVE_DATASET, "dataset")]
+        targets = [(repo, "model") for repo in MASSIVE_MODELS.values()] + [(MASSIVE_DATASET, "dataset")]
     else:
         targets = [(repo, "model") for repo in MODELS.values()] + [(DATASET, "dataset")]
     for repo, kind in targets:
@@ -274,6 +388,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "upload":
         upload(user, args.task)
     elif args.task == "massive":
+        stage_massive_models(user)
         stage_massive()
     else:
         stage(user)
